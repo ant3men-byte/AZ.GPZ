@@ -7,6 +7,11 @@
 #import <MapKit/MapKit.h>
 #import <CoreLocation/CoreLocation.h>
 #import <cmath>
+#import <objc/runtime.h>
+
+static char AZBaseFrameKey, AZButtonKey;
+static NSString *const AZLayoutPrefsKey=@"AZ.GPS.ui.layout";
+static NSString *const AZAppearancePrefsKey=@"AZ.GPS.ui.appearance";
 
 #pragma mark - Root
 
@@ -97,6 +102,7 @@
     CLLocationCoordinate2D _selectedCoordinate;
     BOOL _hasCoordinate;
     NSTimer *_statusTimer;
+    NSMutableArray<NSDictionary *> *_customButtons;
     MKPointAnnotation *_movementPin;
 }
 
@@ -234,6 +240,8 @@
 
     [root addSubview:b];
     _floatingButton = b;
+    [b addGestureRecognizer:[[UILongPressGestureRecognizer alloc]initWithTarget:self action:@selector(customizationLongPress:)]];
+    [self applyFloatingPreferences];
 }
 
 - (void)dragFloating:(UIPanGestureRecognizer *)g {
@@ -249,6 +257,7 @@
     c.y = MAX(hh, MIN(CGRectGetHeight(p.bounds)-hh, c.y));
     v.center = c;
     [g setTranslation:CGPointZero inView:p];
+    if(g.state==UIGestureRecognizerStateEnded){NSMutableDictionary *prefs=[[self appearancePreferences]mutableCopy];prefs[@"x"]=@(v.center.x/MAX(1.0,CGRectGetWidth(p.bounds)));prefs[@"y"]=@(v.center.y/MAX(1.0,CGRectGetHeight(p.bounds)));[NSUserDefaults.standardUserDefaults setObject:prefs forKey:AZAppearancePrefsKey];}
 }
 
 #pragma mark - Panel
@@ -471,8 +480,8 @@
     UIButton *custom=[self button:@"\u2637  \u062A\u062E\u0635\u064A\u0635" frame:CGRectMake(margin+(third+gap)*2,958,third,50) tint:cyan];
     [stop addTarget:self action:@selector(stopAll) forControlEvents:UIControlEventTouchUpInside];
     [hide addTarget:self action:@selector(closePanel) forControlEvents:UIControlEventTouchUpInside];
-    [custom addTarget:self action:@selector(notImplemented) forControlEvents:UIControlEventTouchUpInside];
-    custom.enabled=NO;custom.alpha=0.4;
+    [custom addTarget:self action:@selector(showCustomization) forControlEvents:UIControlEventTouchUpInside];
+    
     [content addSubview:stop]; [content addSubview:hide]; [content addSubview:custom];
 
     UIButton *logs=[self button:@"Logs" frame:CGRectMake(margin,1018,inner,46)
@@ -485,6 +494,8 @@
     _statusLabel.textColor=[UIColor colorWithWhite:1 alpha:.45];
     [content addSubview:_statusLabel];
 
+    [self registerCustomization];
+    [self applyCustomizedLayout];
     [self refreshStatus];
 }
 
@@ -1182,6 +1193,188 @@
                                        handler:nil]];
     [vc presentViewController:a animated:YES completion:nil];
 }
+
+
+#pragma mark - Customization
+- (NSDictionary *)appearancePreferences {return [NSUserDefaults.standardUserDefaults dictionaryForKey:AZAppearancePrefsKey] ?: @{};}
+- (NSDictionary *)layoutPreferences {return [NSUserDefaults.standardUserDefaults dictionaryForKey:AZLayoutPrefsKey] ?: @{};}
+- (UIColor *)customAccent {
+    NSString *hex=[self appearancePreferences][@"accent"];if(!hex.length)return nil;
+    unsigned value=0;[[NSScanner scannerWithString:hex]scanHexInt:&value];
+    return [UIColor colorWithRed:((value>>16)&255)/255.0 green:((value>>8)&255)/255.0 blue:(value&255)/255.0 alpha:1];
+}
+- (void)applyFloatingPreferences {
+    NSDictionary *prefs=[self appearancePreferences];CGFloat size=prefs[@"size"]?[prefs[@"size"]doubleValue]:62;
+    size=MAX(44,MIN(110,size));CGFloat alpha=prefs[@"alpha"]?[prefs[@"alpha"]doubleValue]:1;
+    UIView *root=_floatingButton.superview;CGFloat w=CGRectGetWidth(root.bounds),h=CGRectGetHeight(root.bounds);
+    CGPoint center=_floatingButton.center;
+    if(prefs[@"x"]&&prefs[@"y"])center=CGPointMake([prefs[@"x"]doubleValue]*w,[prefs[@"y"]doubleValue]*h);
+    center.x=MAX(size/2,MIN(w-size/2,center.x));center.y=MAX(size/2,MIN(h-size/2,center.y));
+    _floatingButton.bounds=CGRectMake(0,0,size,size);_floatingButton.center=center;
+    _floatingButton.layer.cornerRadius=size/2;_floatingButton.alpha=MAX(0.25,MIN(1,alpha));
+    _floatingButton.titleLabel.font=[UIFont systemFontOfSize:size*0.47];
+    _floatingButton.backgroundColor=[self customAccent] ?: [UIColor colorWithRed:0.08 green:0.09 blue:0.1 alpha:0.98];
+}
+- (void)customizationLongPress:(UILongPressGestureRecognizer *)gesture {
+    if(gesture.state!=UIGestureRecognizerStateBegan)return;
+    if(!_panel)[self buildPanel];[self showCustomization];
+}
+- (BOOL)isCustomizationButton:(UIButton *)button {
+    return [[button actionsForTarget:self forControlEvent:UIControlEventTouchUpInside]containsObject:@"showCustomization"];
+}
+- (void)registerViews:(UIView *)container path:(NSString *)path {
+    NSUInteger index=0;
+    for(UIView *view in container.subviews){
+        NSString *key=[NSString stringWithFormat:@"%@/%lu",path,(unsigned long)index++];
+        objc_setAssociatedObject(view,&AZBaseFrameKey,[NSValue valueWithCGRect:view.frame],OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        if([view isKindOfClass:UIButton.class]){
+            UIButton *button=(UIButton *)view;
+            objc_setAssociatedObject(button,&AZButtonKey,key,OBJC_ASSOCIATION_COPY_NONATOMIC);
+            NSString *title=[button titleForState:UIControlStateNormal] ?: @"زر";
+            [_customButtons addObject:@{@"key":key,@"title":title,@"button":button}];
+        }else if([view class]==UIView.class){[self registerViews:view path:key];}
+    }
+}
+- (void)registerCustomization {
+    _customButtons=[NSMutableArray new];[self registerViews:_content path:@"panel"];
+}
+- (CGRect)baseFrame:(UIView *)view {
+    NSValue *value=objc_getAssociatedObject(view,&AZBaseFrameKey);return value?value.CGRectValue:view.frame;
+}
+- (CGFloat)reflowContainer:(UIView *)container {
+    NSArray *ordered=[container.subviews sortedArrayUsingComparator:^NSComparisonResult(UIView *a,UIView *b){
+        CGRect x=[self baseFrame:a],y=[self baseFrame:b];if(x.origin.y<y.origin.y)return NSOrderedAscending;if(x.origin.y>y.origin.y)return NSOrderedDescending;
+        return x.origin.x<y.origin.x?NSOrderedAscending:NSOrderedDescending;
+    }];
+    NSMutableArray *groups=[NSMutableArray new];NSMutableArray *group=nil;CGFloat end=-1;
+    for(UIView *view in ordered){
+        CGRect base=[self baseFrame:view];
+        if(!group||base.origin.y>=end){group=[NSMutableArray new];[groups addObject:group];end=CGRectGetMaxY(base);}
+        [group addObject:view];end=MAX(end,CGRectGetMaxY(base));
+    }
+    NSDictionary *prefs=[self layoutPreferences];CGFloat shift=0;
+    for(NSArray *row in groups){
+        CGFloat start=CGFLOAT_MAX,oldEnd=0,newEnd=0;NSMutableArray *buttons=[NSMutableArray new];BOOL changed=NO;
+        for(UIView *view in row){
+            CGRect base=[self baseFrame:view];start=MIN(start,base.origin.y);oldEnd=MAX(oldEnd,CGRectGetMaxY(base));
+            if([view isKindOfClass:UIButton.class]){
+                [buttons addObject:view];NSString *key=objc_getAssociatedObject(view,&AZButtonKey);NSDictionary *setting=prefs[key];
+                if(setting.count)changed=YES;
+            }else if([view class]==UIView.class){
+                CGFloat height=[self reflowContainer:view];CGRect frame=base;frame.size.height=height;view.frame=frame;
+            }else view.frame=base;
+        }
+        CGFloat nonButtonEnd=start;
+        for(UIView *view in row)if(![view isKindOfClass:UIButton.class]){
+            CGRect frame=view.frame;frame.origin.y=[self baseFrame:view].origin.y+shift;view.frame=frame;
+            newEnd=MAX(newEnd,CGRectGetMaxY(frame));nonButtonEnd=MAX(nonButtonEnd,CGRectGetMaxY(frame)-shift);
+        }
+        NSArray *sorted=[buttons sortedArrayUsingComparator:^NSComparisonResult(UIView *a,UIView *b){return [self baseFrame:a].origin.x<[self baseFrame:b].origin.x?NSOrderedAscending:NSOrderedDescending;}];
+        CGFloat left=sorted.count?[self baseFrame:sorted.firstObject].origin.x:0;
+        if(row.count!=buttons.count)left=MIN(left,16.0);
+        CGFloat x=left,y=row.count==buttons.count?start:nonButtonEnd+8,lineHeight=0;
+        CGFloat width=CGRectGetWidth(container.bounds);
+        for(UIButton *button in sorted){
+            CGRect base=[self baseFrame:button];NSDictionary *setting=prefs[objc_getAssociatedObject(button,&AZButtonKey)];
+            BOOL pinned=[self isCustomizationButton:button];button.hidden=!pinned&&[setting[@"hidden"]boolValue];
+            if(button.hidden)continue;
+            CGRect frame=base;
+            if(changed){
+                frame.size.width=setting[@"width"]?MAX(44,MIN(width-left*2,[setting[@"width"]doubleValue])):MIN(base.size.width,width-left*2);
+                frame.size.height=setting[@"height"]?MAX(32,MIN(160,[setting[@"height"]doubleValue])):base.size.height;
+                if(x>left&&x+frame.size.width>width-left){x=left;y+=lineHeight+8;lineHeight=0;}
+                frame.origin=CGPointMake(x,y+shift);x+=frame.size.width+8;lineHeight=MAX(lineHeight,frame.size.height);
+            }else frame.origin.y+=shift;
+            button.frame=frame;newEnd=MAX(newEnd,CGRectGetMaxY(frame));
+        }
+        if(!newEnd)newEnd=start+shift;shift+=newEnd-(oldEnd+shift);
+    }
+    return MAX(1,CGRectGetHeight([self baseFrame:container])+shift);
+}
+- (void)applyCustomizedLayout {
+    UIColor *accent=[self customAccent];
+    for(NSDictionary *item in _customButtons){
+        UIButton *button=item[@"button"];
+        if(accent){button.backgroundColor=[accent colorWithAlphaComponent:0.23];button.layer.borderColor=[accent colorWithAlphaComponent:0.65].CGColor;}
+    }
+    if([self layoutPreferences].count){
+        CGFloat height=[self reflowContainer:_content];CGRect frame=_content.frame;frame.size.height=height;_content.frame=frame;_panel.contentSize=frame.size;
+    }
+}
+- (void)rebuildCustomizedPanel {
+    BOOL open=_panel!=nil;if(open){[self closePanel];[self buildPanel];}[self applyFloatingPreferences];
+}
+- (void)showCustomization {
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"تخصيص AZ.GPS" message:@"تغيير حجم الأزرار وإخفاؤها لا يوقف الوظائف التي تعمل. زر التخصيص يبقى متاحًا." preferredStyle:UIAlertControllerStyleActionSheet];
+    [alert addAction:[UIAlertAction actionWithTitle:@"تعديل الأزرار وإظهار المخفي" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[self showButtonEditorList];}]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"اللون والزر العائم" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[self showAppearanceEditor];}]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"إرجاع الافتراضي" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *a){[self confirmResetCustomization];}]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"إغلاق" style:UIAlertActionStyleCancel handler:nil]];
+    alert.popoverPresentationController.sourceView=_panel ?: _floatingButton;
+    alert.popoverPresentationController.sourceRect=alert.popoverPresentationController.sourceView.bounds;
+    [[self presenter]presentViewController:alert animated:YES completion:nil];
+}
+- (void)showButtonEditorList {
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"أزرار الواجهة" message:@"اختر زرًا لتعديل عرضه وارتفاعه أو إخفائه." preferredStyle:UIAlertControllerStyleActionSheet];
+    NSDictionary *prefs=[self layoutPreferences];
+    for(NSDictionary *item in _customButtons){
+        BOOL hidden=[prefs[item[@"key"]][@"hidden"]boolValue];
+        NSString *title=[NSString stringWithFormat:@"%@%@ %@",hidden?@"مخفي • ":@"",item[@"title"],[item[@"button"] isEnabled]?@"":@"(غير متاح)"];
+        [alert addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){[self editButton:item];}]];
+    }
+    [alert addAction:[UIAlertAction actionWithTitle:@"إلغاء" style:UIAlertActionStyleCancel handler:nil]];
+    alert.popoverPresentationController.sourceView=_panel;alert.popoverPresentationController.sourceRect=_panel.bounds;
+    [[self presenter]presentViewController:alert animated:YES completion:nil];
+}
+- (void)editButton:(NSDictionary *)item {
+    UIButton *button=item[@"button"];CGRect base=[self baseFrame:button];NSDictionary *setting=[self layoutPreferences][item[@"key"]];
+    BOOL pinned=[self isCustomizationButton:button];
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:item[@"title"] message:@"العرض 44–340 والارتفاع 32–160 نقطة. العرض يتكيّف مع مساحة الواجهة. إخفاء الزر قابل للاستعادة." preferredStyle:UIAlertControllerStyleAlert];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *f){f.placeholder=@"العرض";f.text=[NSString stringWithFormat:@"%.0f",setting[@"width"]?[setting[@"width"]doubleValue]:base.size.width];f.keyboardType=UIKeyboardTypeDecimalPad;}];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *f){f.placeholder=@"الارتفاع";f.text=[NSString stringWithFormat:@"%.0f",setting[@"height"]?[setting[@"height"]doubleValue]:base.size.height];f.keyboardType=UIKeyboardTypeDecimalPad;}];
+    [alert addAction:[UIAlertAction actionWithTitle:@"حفظ الحجم" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){
+        double width=[alert.textFields[0].text doubleValue],height=[alert.textFields[1].text doubleValue];
+        if(!isfinite(width)||!isfinite(height)||width<44||width>340||height<32||height>160){[self alert:@"أدخل عرضًا 44–340 وارتفاعًا 32–160."];return;}
+        NSMutableDictionary *prefs=[[self layoutPreferences]mutableCopy];prefs[item[@"key"]]=@{@"width":@(width),@"height":@(height),@"hidden":@(!pinned&&[setting[@"hidden"]boolValue])};
+        [NSUserDefaults.standardUserDefaults setObject:prefs forKey:AZLayoutPrefsKey];[self rebuildCustomizedPanel];
+    }]];
+    if(!pinned)[alert addAction:[UIAlertAction actionWithTitle:[setting[@"hidden"]boolValue]?@"إظهار الزر":@"إخفاء الزر" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){
+        NSMutableDictionary *prefs=[[self layoutPreferences]mutableCopy],*value=[setting mutableCopy] ?: [NSMutableDictionary new];value[@"hidden"]=@(![setting[@"hidden"]boolValue]);prefs[item[@"key"]]=value;
+        [NSUserDefaults.standardUserDefaults setObject:prefs forKey:AZLayoutPrefsKey];[self rebuildCustomizedPanel];
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"إعادة هذا الزر للافتراضي" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){
+        NSMutableDictionary *prefs=[[self layoutPreferences]mutableCopy];[prefs removeObjectForKey:item[@"key"]];[NSUserDefaults.standardUserDefaults setObject:prefs forKey:AZLayoutPrefsKey];[self rebuildCustomizedPanel];
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"إلغاء" style:UIAlertActionStyleCancel handler:nil]];
+    [[self presenter]presentViewController:alert animated:YES completion:nil];
+}
+- (void)showAppearanceEditor {
+    NSDictionary *prefs=[self appearancePreferences];
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"المظهر والزر العائم" message:@"لون HEX مثل 0099FF (اتركه فارغًا للون الأصلي). حجم الزر 44–110، الشفافية 25–100%. موضع الزر يُحفظ تلقائيًا عند سحبه." preferredStyle:UIAlertControllerStyleAlert];
+    NSArray *values=@[prefs[@"accent"] ?: @"",[NSString stringWithFormat:@"%.0f",prefs[@"size"]?[prefs[@"size"]doubleValue]:62],[NSString stringWithFormat:@"%.0f",prefs[@"alpha"]?[prefs[@"alpha"]doubleValue]*100:100]];
+    NSArray *names=@[@"لون HEX",@"حجم الزر",@"الشفافية %"];
+    for(NSUInteger i=0;i<3;i++)[alert addTextFieldWithConfigurationHandler:^(UITextField *f){f.text=values[i];f.placeholder=names[i];f.autocorrectionType=UITextAutocorrectionTypeNo;}];
+    [alert addAction:[UIAlertAction actionWithTitle:@"حفظ" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){
+        NSString *hex=[[alert.textFields[0].text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]uppercaseString];if([hex hasPrefix:@"#"])hex=[hex substringFromIndex:1];
+        NSRegularExpression *regex=[NSRegularExpression regularExpressionWithPattern:@"^[0-9A-F]{6}$" options:0 error:nil];
+        double size=[alert.textFields[1].text doubleValue],alpha=[alert.textFields[2].text doubleValue]/100;
+        if((hex.length&&![regex numberOfMatchesInString:hex options:0 range:NSMakeRange(0,hex.length)])||!isfinite(size)||size<44||size>110||!isfinite(alpha)||alpha<0.25||alpha>1){[self alert:@"تحقق من اللون والحجم والشفافية."];return;}
+        NSMutableDictionary *value=[prefs mutableCopy];value[@"accent"]=hex;value[@"size"]=@(size);value[@"alpha"]=@(alpha);
+        [NSUserDefaults.standardUserDefaults setObject:value forKey:AZAppearancePrefsKey];[self rebuildCustomizedPanel];
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"إلغاء" style:UIAlertActionStyleCancel handler:nil]];
+    [[self presenter]presentViewController:alert animated:YES completion:nil];
+}
+- (void)confirmResetCustomization {
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"إرجاع الواجهة الافتراضية؟" message:@"يرجع أحجام الأزرار ويظهرها ويعيد اللون وحجم وشفافية وموضع الزر العائم." preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"إرجاع الافتراضي" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *a){
+        [NSUserDefaults.standardUserDefaults removeObjectForKey:AZLayoutPrefsKey];[NSUserDefaults.standardUserDefaults removeObjectForKey:AZAppearancePrefsKey];
+        _floatingButton.frame=CGRectMake(18,160,62,62);[self rebuildCustomizedPanel];
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"إلغاء" style:UIAlertActionStyleCancel handler:nil]];
+    [[self presenter]presentViewController:alert animated:YES completion:nil];
+}
+
 
 #pragma mark - Close
 
