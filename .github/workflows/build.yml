@@ -1,0 +1,30 @@
+name: Build AZ.GPS
+on:
+  workflow_dispatch:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Portable math tests
+        run: make test
+      - name: Build iOS 12 arm64 library
+        run: make
+      - name: Verify binary
+        run: |
+          file build/AZ.GPS.dylib | grep arm64
+          otool -L build/AZ.GPS.dylib
+          codesign --verify build/AZ.GPS.dylib
+          cd build
+          shasum -a 256 AZ.GPS.dylib > SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AZ.GPS-arm64-ios12
+          path: |
+            build/AZ.GPS.dylib
+            build/SHA256SUMS.txt
+          if-no-files-found: error
