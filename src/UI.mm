@@ -1276,7 +1276,7 @@ static NSString *const AZAppearancePrefsKey=@"AZ.GPS.ui.appearance";
         CGFloat width=CGRectGetWidth(container.bounds);
         for(UIButton *button in sorted){
             CGRect base=[self baseFrame:button];NSDictionary *setting=prefs[objc_getAssociatedObject(button,&AZButtonKey)];
-            BOOL protected=[self isCustomizationButton:button];button.hidden=!protected&&[setting[@"hidden"]boolValue];
+            BOOL pinned=[self isCustomizationButton:button];button.hidden=!pinned&&[setting[@"hidden"]boolValue];
             if(button.hidden)continue;
             CGRect frame=base;
             if(changed){
@@ -1328,17 +1328,17 @@ static NSString *const AZAppearancePrefsKey=@"AZ.GPS.ui.appearance";
 }
 - (void)editButton:(NSDictionary *)item {
     UIButton *button=item[@"button"];CGRect base=[self baseFrame:button];NSDictionary *setting=[self layoutPreferences][item[@"key"]];
-    BOOL protected=[self isCustomizationButton:button];
+    BOOL pinned=[self isCustomizationButton:button];
     UIAlertController *alert=[UIAlertController alertControllerWithTitle:item[@"title"] message:@"العرض 44–340 والارتفاع 32–160 نقطة. العرض يتكيّف مع مساحة الواجهة. إخفاء الزر قابل للاستعادة." preferredStyle:UIAlertControllerStyleAlert];
     [alert addTextFieldWithConfigurationHandler:^(UITextField *f){f.placeholder=@"العرض";f.text=[NSString stringWithFormat:@"%.0f",setting[@"width"]?[setting[@"width"]doubleValue]:base.size.width];f.keyboardType=UIKeyboardTypeDecimalPad;}];
     [alert addTextFieldWithConfigurationHandler:^(UITextField *f){f.placeholder=@"الارتفاع";f.text=[NSString stringWithFormat:@"%.0f",setting[@"height"]?[setting[@"height"]doubleValue]:base.size.height];f.keyboardType=UIKeyboardTypeDecimalPad;}];
     [alert addAction:[UIAlertAction actionWithTitle:@"حفظ الحجم" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){
         double width=[alert.textFields[0].text doubleValue],height=[alert.textFields[1].text doubleValue];
         if(!isfinite(width)||!isfinite(height)||width<44||width>340||height<32||height>160){[self alert:@"أدخل عرضًا 44–340 وارتفاعًا 32–160."];return;}
-        NSMutableDictionary *prefs=[[self layoutPreferences]mutableCopy];prefs[item[@"key"]]=@{@"width":@(width),@"height":@(height),@"hidden":@(!protected&&[setting[@"hidden"]boolValue])};
+        NSMutableDictionary *prefs=[[self layoutPreferences]mutableCopy];prefs[item[@"key"]]=@{@"width":@(width),@"height":@(height),@"hidden":@(!pinned&&[setting[@"hidden"]boolValue])};
         [NSUserDefaults.standardUserDefaults setObject:prefs forKey:AZLayoutPrefsKey];[self rebuildCustomizedPanel];
     }]];
-    if(!protected)[alert addAction:[UIAlertAction actionWithTitle:[setting[@"hidden"]boolValue]?@"إظهار الزر":@"إخفاء الزر" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){
+    if(!pinned)[alert addAction:[UIAlertAction actionWithTitle:[setting[@"hidden"]boolValue]?@"إظهار الزر":@"إخفاء الزر" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a){
         NSMutableDictionary *prefs=[[self layoutPreferences]mutableCopy],*value=[setting mutableCopy] ?: [NSMutableDictionary new];value[@"hidden"]=@(![setting[@"hidden"]boolValue]);prefs[item[@"key"]]=value;
         [NSUserDefaults.standardUserDefaults setObject:prefs forKey:AZLayoutPrefsKey];[self rebuildCustomizedPanel];
     }]];
