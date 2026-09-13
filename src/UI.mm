@@ -96,6 +96,7 @@
     CLLocationCoordinate2D _selectedCoordinate;
     BOOL _hasCoordinate;
     NSTimer *_statusTimer;
+    MKPointAnnotation *_movementPin;
 }
 
 + (instancetype)sharedController {
@@ -1132,6 +1133,11 @@
     BOOL active=[s[@"locationEnabled"] boolValue];
     if (_statusLabel) _statusLabel.text=[s[@"movementActive"]boolValue] ? [NSString stringWithFormat:@"%@ %@ • %.0f%%", [s[@"randomMovementActive"]boolValue]?@"عشوائي":@"مسار", [s[@"movementPaused"]boolValue]?@"متوقف مؤقتًا":@"يعمل", [s[@"routeProgress"]doubleValue]*100] : (active ? @"LOCATION ACTIVE" : @"DEFAULT");
     if (_locationSwitch) _locationSwitch.on=active;
+    if (_mapView && [s[@"movementActive"]boolValue]) {
+        if (!_movementPin) {_movementPin=[MKPointAnnotation new];_movementPin.title=@"AZ.GPS — الموقع المتحرك";[_mapView addAnnotation:_movementPin];}
+        _movementPin.coordinate=CLLocationCoordinate2DMake([s[@"currentLatitude"]doubleValue],[s[@"currentLongitude"]doubleValue]);
+    } else if (_movementPin) {[_mapView removeAnnotation:_movementPin];_movementPin=nil;}
+
 }
 
 
@@ -1195,6 +1201,7 @@
     _content=nil;
     _searchBar=nil;
     _mapView=nil;
+    _movementPin=nil;
     _coordLabel=nil;
     _statusLabel=nil;
     _locationSwitch=nil;

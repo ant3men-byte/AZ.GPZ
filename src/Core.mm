@@ -1134,7 +1134,7 @@ static NSString * const kLastLonKey = @"azgps.lastLongitude";
         if(!azgps::scheduleDue((int)[entry[@"minute"]integerValue],(int)(parts.hour*60+parts.minute),(int)parts.weekday,mask,false))continue;
         NSString *key=[@"AZ.GPS.fired." stringByAppendingString:entry[@"id"]];
         NSString *date=[NSString stringWithFormat:@"%ld-%ld-%ld",(long)parts.year,(long)parts.month,(long)parts.day];
-        if([[NSUserDefaults.standardUserDefaults stringForKey:key]isEqual:date])continue;
+        if(!azgps::scheduleDue((int)[entry[@"minute"]integerValue],(int)(parts.hour*60+parts.minute),(int)parts.weekday,mask,[[NSUserDefaults.standardUserDefaults stringForKey:key]isEqual:date]))continue;
         [NSUserDefaults.standardUserDefaults setObject:date forKey:key];NSDictionary *plan=entry[@"plan"];NSString *type=plan[@"type"];
         if([type isEqual:@"route"])[self startRouteWithWaypoints:plan[@"points"] speed:[plan[@"speed"]doubleValue]];
         else { [self activateStaticLocationWithLatitude:[plan[@"lat"]doubleValue] longitude:[plan[@"lon"]doubleValue]];
