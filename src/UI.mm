@@ -5,6 +5,7 @@
 #import <UIKit/UIKit.h>
 #import <MapKit/MapKit.h>
 #import <CoreLocation/CoreLocation.h>
+#import <cmath>
 
 #pragma mark - Root
 
@@ -94,6 +95,8 @@
 
     CLLocationCoordinate2D _selectedCoordinate;
     BOOL _hasCoordinate;
+    NSTimer *_statusTimer;
+    MKPointAnnotation *_movementPin;
 }
 
 + (instancetype)sharedController {
@@ -163,6 +166,8 @@
     _overlayWindow = w;
 
     [self buildFloatingButton:root.view];
+    _statusTimer=[NSTimer timerWithTimeInterval:1 repeats:YES block:^(__unused NSTimer *timer){[self refreshStatus];}];
+    [[NSRunLoop mainRunLoop]addTimer:_statusTimer forMode:NSRunLoopCommonModes];
 }
 
 #pragma mark - Helpers
@@ -400,7 +405,7 @@
     [route addTarget:self action:@selector(routeTapped) forControlEvents:UIControlEventTouchUpInside];
     [random addTarget:self action:@selector(randomTapped) forControlEvents:UIControlEventTouchUpInside];
     [schedule addTarget:self action:@selector(scheduleTapped) forControlEvents:UIControlEventTouchUpInside];
-    for (UIButton *pending in @[route,random,schedule]) { pending.enabled=NO; pending.alpha=0.4; }
+    
     [content addSubview:route]; [content addSubview:random]; [content addSubview:schedule];
 
     // Alternate photo card
@@ -866,7 +871,7 @@
     __weak AZUIController *weakSelf=self;
     for (AZLocationModel *item in items) {
         NSString *title=[NSString stringWithFormat:@"%@ — %.6f, %.6f",item.name,item.latitude,item.longitude];
-        [list addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        [list addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
             AZUIController *selfRef=weakSelf;
             if (!selfRef) return;
             AZError *result=[[AZAppManager sharedManager] activateStaticLocationWithLatitude:item.latitude longitude:item.longitude];
@@ -886,268 +891,136 @@
     [presenter presentViewController:list animated:YES completion:nil];
 }
 
+
+- (UIViewController *)presenter {
+    UIViewController *vc=_overlayWindow.rootViewController;
+    while(vc.presentedViewController)vc=vc.presentedViewController;
+    return vc;
+}
+- (void)showMovementControls {
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"الحركة الحالية" message:@"أوقف الحركة أو استأنفها، أو ابدأ وضعًا جديدًا." preferredStyle:UIAlertControllerStyleAlert];
+    AZAppManager *manager=AZAppManager.sharedManager;
+    [alert addAction:[UIAlertAction actionWithTitle:@"إيقاف مؤقت" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action){[manager pauseMovement];[self refreshStatus];}]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"استئناف" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action){[manager resumeMovement];[self refreshStatus];}]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"إيقاف الحركة" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *action){[manager stopMovement];[self refreshStatus];}]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"مسار جديد" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action){[self configureRoute];}]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"عشوائي جديد" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action){[self configureRandom];}]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"إلغاء" style:UIAlertActionStyleCancel handler:nil]];
+    [[self presenter]presentViewController:alert animated:YES completion:nil];
+}
 - (void)routeTapped {
-
-    AZAuditLogFeature(
-        @"routeTapped",
-        @"REQUESTED",
-        @"Preparing two-point route"
-    );
-
-    if (!_hasCoordinate) {
-
-        [self auditStateForFeature:
-            @"routeTapped"
-            status:@"ERROR"
-            details:@"No destination selected"];
-
-        [self alert:
-            @"\u062d\u062f\u062f \u0646\u0642\u0637\u0629 \u0627\u0644\u0648\u0635\u0648\u0644 \u0639\u0644\u0649 \u0627\u0644\u062e\u0631\u064a\u0637\u0629 \u0623\u0648\u0644\u0627\u064b."];
-
-        return;
-    }
-
-    CLLocationCoordinate2D destination =
-        _selectedCoordinate;
-
-    CLLocationCoordinate2D start =
-        kCLLocationCoordinate2DInvalid;
-
-    CLLocation *mapLocation =
-        _mapView.userLocation.location;
-
-    if (mapLocation != nil &&
-        CLLocationCoordinate2DIsValid(mapLocation.coordinate)) {
-
-        start =
-            mapLocation.coordinate;
-    }
-    else {
-
-        AZRuntimeState *state =
-            [AZRuntimeState sharedState];
-
-        if (state.locationEnabled &&
-            state.currentLatitude >= -90.0 &&
-            state.currentLatitude <= 90.0 &&
-            state.currentLongitude >= -180.0 &&
-            state.currentLongitude <= 180.0) {
-
-            start =
-                CLLocationCoordinate2DMake(
-                    state.currentLatitude,
-                    state.currentLongitude
-                );
-        }
-    }
-
-    if (!CLLocationCoordinate2DIsValid(start)) {
-
-        [self auditStateForFeature:
-            @"routeTapped"
-            status:@"ERROR"
-            details:@"No valid start location available"];
-
-        [self alert:
-            @"\u0644\u0645 \u064a\u062a\u0645 \u0627\u0644\u0639\u062b\u0648\u0631 \u0639\u0644\u0649 \u0646\u0642\u0637\u0629 \u0628\u062f\u0627\u064a\u0629. \u0627\u0636\u063a\u0637 \u0645\u0648\u0642\u0639\u064a \u0623\u0648\u0644\u0627\u064b \u062b\u0645 \u062d\u062f\u062f \u0627\u0644\u0648\u062c\u0647\u0629."];
-
-        return;
-    }
-
-    CLLocation *startLocation =
-        [[CLLocation alloc]
-            initWithLatitude:start.latitude
-            longitude:start.longitude];
-
-    CLLocation *endLocation =
-        [[CLLocation alloc]
-            initWithLatitude:destination.latitude
-            longitude:destination.longitude];
-
-    CLLocationDistance distance =
-        [startLocation distanceFromLocation:endLocation];
-
-    if (distance < 2.0) {
-
-        [self auditStateForFeature:
-            @"routeTapped"
-            status:@"ERROR"
-            details:@"Start and destination are effectively the same"];
-
-        [self alert:
-            @"\u0646\u0642\u0637\u0629 \u0627\u0644\u0628\u062f\u0627\u064a\u0629 \u0648\u0627\u0644\u0648\u062c\u0647\u0629 \u0645\u062a\u0637\u0627\u0628\u0642\u062a\u0627\u0646. \u062d\u062f\u062f \u0648\u062c\u0647\u0629 \u0623\u062e\u0631\u0649."];
-
-        return;
-    }
-
-    UIAlertController *sheet =
-        [UIAlertController
-            alertControllerWithTitle:@"Route"
-            message:[NSString stringWithFormat:
-                @"Distance: %.0f m\nEnter speed in m/s",
-                distance]
-            preferredStyle:UIAlertControllerStyleAlert];
-
-    [sheet addTextFieldWithConfigurationHandler:
-        ^(UITextField *field) {
-
-            field.placeholder = @"Speed";
-            field.text = @"5.0";
-            field.keyboardType =
-                UIKeyboardTypeDecimalPad;
-        }];
-
-    __weak AZUIController *weakSelf = self;
-
-    UIAlertAction *startAction =
-        [UIAlertAction
-            actionWithTitle:@"Start"
-            style:UIAlertActionStyleDefault
-            handler:^(UIAlertAction *action) {
-
-                (void)action;
-
-                AZUIController *selfRef =
-                    weakSelf;
-
-                if (!selfRef) return;
-
-                double speed =
-                    [sheet.textFields.firstObject.text
-                        doubleValue];
-
-                if (speed <= 0.0 || speed > 300.0) {
-
-                    [selfRef auditStateForFeature:
-                        @"routeTapped"
-                        status:@"ERROR"
-                        details:@"Invalid route speed"];
-
-                    [selfRef alert:
-                        @"\u0627\u0644\u0633\u0631\u0639\u0629 \u063a\u064a\u0631 \u0635\u062d\u064a\u062d\u0629."];
-
-                    return;
-                }
-
-                NSArray *waypoints =
-                    @[
-                        @{
-                            @"lat": @(start.latitude),
-                            @"lon": @(start.longitude)
-                        },
-                        @{
-                            @"lat": @(destination.latitude),
-                            @"lon": @(destination.longitude)
-                        }
-                    ];
-
-                AZError *e =
-                    [[AZAppManager sharedManager]
-                        startRouteWithWaypoints:waypoints
-                        speed:speed];
-
-                [selfRef auditErrorResult:
-                    e
-                    feature:@"startRoute"
-                    details:[NSString stringWithFormat:
-                        @"from=%.8f,%.8f | to=%.8f,%.8f | speed=%.2f | distance=%.2f",
-                        start.latitude,
-                        start.longitude,
-                        destination.latitude,
-                        destination.longitude,
-                        speed,
-                        distance]];
-
-                if ([e isSuccess]) {
-
-                    selfRef->_locationSwitch.on =
-                        YES;
-
-                    [selfRef alert:
-                        @"Route started \u2705"];
-                }
-                else {
-
-                    [selfRef alert:
-                        e.humanReadableMessage
-                            ?: @"Route failed."];
-                }
-
-                [selfRef refreshStatus];
-            }];
-
-    UIAlertAction *cancelAction =
-        [UIAlertAction
-            actionWithTitle:@"Cancel"
-            style:UIAlertActionStyleCancel
-            handler:nil];
-
-    [sheet addAction:startAction];
-    [sheet addAction:cancelAction];
-
-    UIViewController *presenter =
-        _overlayWindow.rootViewController;
-
-    [presenter
-        presentViewController:sheet
-        animated:YES
-        completion:nil];
+    if(AZRuntimeState.sharedState.movementActive){[self showMovementControls];return;}
+    [self configureRoute];
 }
-
-
+- (void)configureRoute {
+    if(!_hasCoordinate){[self alert:@"حدد الوجهة على الخريطة أو من المحفوظات أولًا."];return;}
+    CLLocationCoordinate2D destination=_selectedCoordinate;
+    AZRuntimeState *state=AZRuntimeState.sharedState;
+    CLLocationCoordinate2D current=CLLocationCoordinate2DMake(state.currentLatitude,state.currentLongitude);
+    BOOL distinct=state.locationEnabled && fabs(current.latitude-destination.latitude)+fabs(current.longitude-destination.longitude)>0.00001;
+    if(distinct){[self routeFrom:current to:destination];return;}
+    AZRequestRealLocation(^(CLLocation *location,NSError *error){
+        if(!location){[self alert:error.localizedDescription];return;}
+        [self routeFrom:location.coordinate to:destination];
+    });
+}
+- (void)routeFrom:(CLLocationCoordinate2D)source to:(CLLocationCoordinate2D)destination {
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"إعداد المسار"
+        message:[NSString stringWithFormat:@"البداية: %.5f, %.5f\nالوجهة: %.5f, %.5f\nالسرعة كم/س",source.latitude,source.longitude,destination.latitude,destination.longitude]
+        preferredStyle:UIAlertControllerStyleAlert];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *field){field.text=@"5";field.keyboardType=UIKeyboardTypeDecimalPad;}];
+    [alert addAction:[UIAlertAction actionWithTitle:@"عرض المسار" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action){
+        double speed=[alert.textFields.firstObject.text doubleValue]/3.6;
+        if(!isfinite(speed)||speed<=0||speed>80){[self alert:@"أدخل سرعة بين 0 و288 كم/س."];return;}
+        NSDictionary *from=@{@"lat":@(source.latitude),@"lon":@(source.longitude)},*to=@{@"lat":@(destination.latitude),@"lon":@(destination.longitude)};
+        [AZAppManager.sharedManager prepareRouteFrom:from to:to completion:^(NSArray *points,NSError *error){[self previewRoute:points speed:speed fallback:error!=nil];}];
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"إلغاء" style:UIAlertActionStyleCancel handler:nil]];
+    [[self presenter]presentViewController:alert animated:YES completion:nil];
+}
+- (void)drawRoute:(NSArray *)points {
+    if(!_mapView)return;
+    [_mapView removeOverlays:_mapView.overlays];
+    NSUInteger count=points.count;if(count<2)return;
+    CLLocationCoordinate2D *coordinates=(CLLocationCoordinate2D *)calloc(count,sizeof(CLLocationCoordinate2D));
+    for(NSUInteger i=0;i<count;i++)coordinates[i]=CLLocationCoordinate2DMake([points[i][@"lat"]doubleValue],[points[i][@"lon"]doubleValue]);
+    MKPolyline *line=[MKPolyline polylineWithCoordinates:coordinates count:count];free(coordinates);
+    [_mapView addOverlay:line];
+    [_mapView setVisibleMapRect:line.boundingMapRect edgePadding:UIEdgeInsetsMake(25,25,25,25) animated:YES];
+}
+- (MKOverlayRenderer *)mapView:(MKMapView *)mapView rendererForOverlay:(id<MKOverlay>)overlay {
+    MKPolylineRenderer *renderer=[[MKPolylineRenderer alloc]initWithOverlay:overlay];renderer.strokeColor=UIColor.blueColor;renderer.lineWidth=4;return renderer;
+}
+- (void)previewRoute:(NSArray *)points speed:(double)speed fallback:(BOOL)fallback {
+    [self drawRoute:points];double distance=0;
+    for(NSUInteger i=1;i<points.count;i++){
+        CLLocation *a=[[CLLocation alloc]initWithLatitude:[points[i-1][@"lat"]doubleValue] longitude:[points[i-1][@"lon"]doubleValue]];
+        CLLocation *b=[[CLLocation alloc]initWithLatitude:[points[i][@"lat"]doubleValue] longitude:[points[i][@"lon"]doubleValue]];
+        distance+=[a distanceFromLocation:b];
+    }
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:fallback?@"لم يتوفر مسار من الخرائط":@"معاينة المسار"
+        message:[NSString stringWithFormat:@"%@\nالمسافة: %.0f متر\nالمدة: %.1f دقيقة",fallback?@"يمكنك اختيار الحركة المباشرة بين النقطتين.":@"المسار جاهز.",distance,distance/speed/60]
+        preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:fallback?@"بدء حركة مباشرة":@"بدء المسار" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action){
+        AZError *result=[AZAppManager.sharedManager startRouteWithWaypoints:points speed:speed];
+        if(!result.isSuccess)[self alert:result.humanReadableMessage];[self refreshStatus];
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"إلغاء" style:UIAlertActionStyleCancel handler:^(__unused UIAlertAction *action){[AZAppManager.sharedManager stopMovement];[_mapView removeOverlays:_mapView.overlays];}]];
+    [[self presenter]presentViewController:alert animated:YES completion:nil];
+}
 - (void)randomTapped {
-
-    AZAuditLogFeature(
-        @"randomTapped",
-        @"REQUESTED",
-        @"radius=100.0m"
-    );
-
-    AZError *e =
-        [[AZAppManager sharedManager]
-            startRandomMovementWithRadius:100.0];
-
-    [self auditErrorResult:
-        e
-        feature:@"startRandomMovement"
-        details:@"radius=100.0m"];
-
-    [self alert:
-        [e isSuccess]
-            ? @"\u062a\u0645 \u062a\u0634\u063a\u064a\u0644 \u0627\u0644\u0648\u0636\u0639 \u0627\u0644\u0639\u0634\u0648\u0627\u0626\u064a \u0641\u064a AZGPS Runtime \u2705"
-            : (e.humanReadableMessage
-                ?: @"\u062a\u0639\u0630\u0631 \u0627\u0644\u062a\u0634\u063a\u064a\u0644.")];
-
-    [self refreshStatus];
+    if(AZRuntimeState.sharedState.movementActive){[self showMovementControls];return;}[self configureRandom];
 }
-
-
+- (void)configureRandom {
+    if(!AZRuntimeState.sharedState.locationEnabled){
+        AZRequestRealLocation(^(CLLocation *location,NSError *error){
+            if(!location){[self alert:error.localizedDescription];return;}
+            [AZAppManager.sharedManager activateStaticLocationWithLatitude:location.coordinate.latitude longitude:location.coordinate.longitude];
+            [self configureRandom];
+        });return;
+    }
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"الحركة العشوائية" message:@"حول موقع AZ.GPS الحالي. نصف القطر بالمتر، السرعة كم/س، التحديث بالثواني." preferredStyle:UIAlertControllerStyleAlert];
+    for(NSString *value in @[@"100",@"5",@"1"])[alert addTextFieldWithConfigurationHandler:^(UITextField *field){field.text=value;field.keyboardType=UIKeyboardTypeDecimalPad;}];
+    [alert addAction:[UIAlertAction actionWithTitle:@"بدء" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action){
+        AZError *result=[AZAppManager.sharedManager startRandomWithRadius:[alert.textFields[0].text doubleValue] speed:[alert.textFields[1].text doubleValue]/3.6 interval:[alert.textFields[2].text doubleValue]];
+        if(!result.isSuccess)[self alert:@"نصف القطر 1–10000 متر، السرعة حتى 288 كم/س، والتحديث 0.25–2 ثانية."];[self refreshStatus];
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"إلغاء" style:UIAlertActionStyleCancel handler:nil]];
+    [[self presenter]presentViewController:alert animated:YES completion:nil];
+}
 - (void)scheduleTapped {
-
-    AZAuditLogFeature(
-        @"scheduleTapped",
-        @"REQUESTED",
-        @"Start scheduler requested"
-    );
-
-    AZError *e =
-        [[AZAppManager sharedManager]
-            startScheduler];
-
-    [self auditErrorResult:
-        e
-        feature:@"startScheduler"
-        details:@"source=Scheduler button"];
-
-    [self alert:
-        [e isSuccess]
-            ? @"\u062a\u0645 \u062a\u0634\u063a\u064a\u0644 Scheduler \u0641\u064a AZGPS Runtime \u2705"
-            : (e.humanReadableMessage
-                ?: @"\u062a\u0639\u0630\u0631 \u0627\u0644\u062a\u0634\u063a\u064a\u0644.")];
-
-    [self refreshStatus];
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"الجدولة" message:@"تعمل أثناء فتح التطبيق فقط. إذا فات الموعد والتطبيق مغلق لا ينفذ بأثر رجعي. الأوقات حسب ساعة الجهاز." preferredStyle:UIAlertControllerStyleActionSheet];
+    for(NSString *type in @[@"location",@"route",@"random"]){
+        NSString *title=[type isEqual:@"location"]?@"جدولة الموقع الحالي":[type isEqual:@"route"]?@"جدولة آخر مسار":@"جدولة آخر إعداد عشوائي";
+        [alert addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action){[self configureSchedule:type];}]];
+    }
+    for(NSDictionary *entry in [AZAppManager.sharedManager schedules]){
+        NSInteger minute=[entry[@"minute"]integerValue];
+        NSString *title=[NSString stringWithFormat:@"حذف %@ — %02ld:%02ld",entry[@"plan"][@"type"],(long)(minute/60),(long)(minute%60)];
+        [alert addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *action){[AZAppManager.sharedManager deleteSchedule:entry[@"id"]];}]];
+    }
+    [alert addAction:[UIAlertAction actionWithTitle:@"تشغيل الجداول" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action){[AZAppManager.sharedManager startScheduler];[self refreshStatus];}]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"إلغاء" style:UIAlertActionStyleCancel handler:nil]];
+    alert.popoverPresentationController.sourceView=_panel ?: [self presenter].view;
+    alert.popoverPresentationController.sourceRect=CGRectMake(14,563,80,50);
+    [[self presenter]presentViewController:alert animated:YES completion:nil];
 }
-
+- (void)configureSchedule:(NSString *)type {
+    if(![type isEqual:@"location"] && ![NSUserDefaults.standardUserDefaults dictionaryForKey:[type isEqual:@"route"]?@"AZ.GPS.lastRoute":@"AZ.GPS.lastRandom"]){[self alert:@"شغل هذا الوضع مرة واحدة أولًا لحفظ إعداداته."];return;}
+    UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"موعد التشغيل" message:@"الوقت HH:mm\nالأيام: 1 الأحد … 7 السبت. مثال 1,2,3,4,5,6,7\nإذا تداخلت الجداول ينفذ آخر جدول في القائمة." preferredStyle:UIAlertControllerStyleAlert];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *field){field.placeholder=@"14:30";}];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *field){field.text=@"1,2,3,4,5,6,7";}];
+    [alert addAction:[UIAlertAction actionWithTitle:@"حفظ" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action){
+        NSString *time=alert.textFields[0].text;NSRegularExpression *regex=[NSRegularExpression regularExpressionWithPattern:@"^([01][0-9]|2[0-3]):[0-5][0-9]$" options:0 error:nil];
+        if(![regex numberOfMatchesInString:time options:0 range:NSMakeRange(0,time.length)]){[self alert:@"أدخل الوقت بصيغة HH:mm."];return;}
+        NSMutableArray *days=[NSMutableArray new];
+        for(NSString *s in [alert.textFields[1].text componentsSeparatedByString:@","]){NSScanner *scanner=[NSScanner scannerWithString:s];NSInteger day=0;if(![scanner scanInteger:&day]||!scanner.isAtEnd||day<1||day>7){[self alert:@"الأيام أرقام من 1 إلى 7 مفصولة بفواصل."];return;}if(![days containsObject:@(day)])[days addObject:@(day)];}
+        NSArray *parts=[time componentsSeparatedByString:@":"];
+        [AZAppManager.sharedManager addDailyScheduleAt:[parts[0]integerValue]*60+[parts[1]integerValue] weekdays:days type:type];[self refreshStatus];
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"إلغاء" style:UIAlertActionStyleCancel handler:nil]];
+    [[self presenter]presentViewController:alert animated:YES completion:nil];
+}
 
 - (void)wifiTapped {
 
@@ -1258,8 +1131,13 @@
 - (void)refreshStatus {
     NSDictionary *s=[[AZRuntimeState sharedState] snapshotForUI];
     BOOL active=[s[@"locationEnabled"] boolValue];
-    if (_statusLabel) _statusLabel.text=active ? @"LOCATION ACTIVE" : @"DEFAULT";
+    if (_statusLabel) _statusLabel.text=[s[@"movementActive"]boolValue] ? [NSString stringWithFormat:@"%@ %@ • %.0f%%", [s[@"randomMovementActive"]boolValue]?@"عشوائي":@"مسار", [s[@"movementPaused"]boolValue]?@"متوقف مؤقتًا":@"يعمل", [s[@"routeProgress"]doubleValue]*100] : (active ? @"LOCATION ACTIVE" : @"DEFAULT");
     if (_locationSwitch) _locationSwitch.on=active;
+    if (_mapView && [s[@"movementActive"]boolValue]) {
+        if (!_movementPin) {_movementPin=[MKPointAnnotation new];_movementPin.title=@"AZ.GPS — الموقع المتحرك";[_mapView addAnnotation:_movementPin];}
+        _movementPin.coordinate=CLLocationCoordinate2DMake([s[@"currentLatitude"]doubleValue],[s[@"currentLongitude"]doubleValue]);
+    } else if (_movementPin) {[_mapView removeAnnotation:_movementPin];_movementPin=nil;}
+
 }
 
 
@@ -1323,6 +1201,7 @@
     _content=nil;
     _searchBar=nil;
     _mapView=nil;
+    _movementPin=nil;
     _coordLabel=nil;
     _statusLabel=nil;
     _locationSwitch=nil;

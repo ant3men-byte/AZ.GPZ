@@ -323,3 +323,12 @@ typedef NS_ENUM(NSInteger, AZMovementEngineState) {
 @class CLLocation;
 /// Fresh real device location, independent of the simulation state. Main-thread completion.
 void AZRequestRealLocation(void (^completion)(CLLocation *location, NSError *error));
+
+@interface AZAppManager (Simulation)
+- (void)prepareRouteFrom:(NSDictionary *)from to:(NSDictionary *)to completion:(void (^)(NSArray *points, NSError *error))completion;
+- (AZError *)startRandomWithRadius:(double)radius speed:(double)speed interval:(double)interval;
+- (void)addDailyScheduleAt:(NSInteger)minute weekdays:(NSArray *)days type:(NSString *)type;
+- (NSArray *)schedules;
+- (void)deleteSchedule:(NSString *)identifier;
+- (void)stopAllFeatures;
+@end

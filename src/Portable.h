@@ -37,3 +37,11 @@ bool validateFavorite(const std::string& schema, bool idIsString, bool nameIsStr
                       bool latIsNumber, bool lonIsNumber, double lat, double lon);
 
 } // namespace azgps
+
+namespace azgps {
+inline bool scheduleDue(int scheduledMinute, int currentMinute, int weekday, unsigned dayMask, bool alreadyFired) {
+    return scheduledMinute>=0 && scheduledMinute<1440 && currentMinute>=0 && currentMinute<1440
+        && weekday>=1 && weekday<=7 && scheduledMinute==currentMinute
+        && (dayMask & (1u << (weekday-1))) && !alreadyFired;
+}
+}
