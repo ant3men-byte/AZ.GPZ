@@ -106,5 +106,15 @@ int main() {
     AZ_CHECK(!validateFavorite("azgps.location/1", true, true, true, true, 90.0001, 0),
              "just-outside boundary rejected");
 
+    WF_CHECK(scheduleDue(0,0,1,1,false), "midnight Sunday fires");
+    WF_CHECK(scheduleDue(1439,1439,7,64,false), "last minute Saturday fires");
+    WF_CHECK(!scheduleDue(600,601,1,127,false), "missed schedule does not replay");
+    WF_CHECK(!scheduleDue(600,600,1,127,true), "already fired schedule does not repeat");
+    WF_CHECK(!scheduleDue(600,600,2,1,false), "excluded weekday does not fire");
+    WF_CHECK(!scheduleDue(-1,0,1,127,false), "negative schedule rejected");
+    WF_CHECK(!scheduleDue(1440,1440,1,127,false), "out of range minute rejected");
+    WF_CHECK(!scheduleDue(600,600,0,127,false), "invalid weekday rejected");
+    WF_CHECK(!scheduleDue(600,600,8,127,false), "weekday above range rejected");
+    WF_CHECK(!scheduleDue(600,600,1,0,false), "empty weekdays never fire");
     return wf_report("AZGPS-AllTests");
 }

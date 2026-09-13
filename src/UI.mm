@@ -870,7 +870,7 @@
     __weak AZUIController *weakSelf=self;
     for (AZLocationModel *item in items) {
         NSString *title=[NSString stringWithFormat:@"%@ — %.6f, %.6f",item.name,item.latitude,item.longitude];
-        [list addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+        [list addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
             AZUIController *selfRef=weakSelf;
             if (!selfRef) return;
             AZError *result=[[AZAppManager sharedManager] activateStaticLocationWithLatitude:item.latitude longitude:item.longitude];

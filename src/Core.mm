@@ -1111,7 +1111,7 @@ static NSString * const kLastLonKey = @"azgps.lastLongitude";
 - (AZError *)startMovementFromLatitude:(double)a longitude:(double)b toLatitude:(double)c longitude2:(double)d speed:(double)s {return [self startRouteWithWaypoints:@[@{@"lat":@(a),@"lon":@(b)},@{@"lat":@(c),@"lon":@(d)}] speed:s];}
 - (NSArray *)schedules {return [[NSUserDefaults standardUserDefaults]arrayForKey:@"AZ.GPS.schedules"] ?: @[];}
 - (void)deleteSchedule:(NSString *)identifier {
-    NSMutableArray *entries=[[self schedules]mutableCopy];NSIndexSet *indexes=[entries indexesOfObjectsPassingTest:^BOOL(NSDictionary *e,NSUInteger i,BOOL *stop){return [e[@"id"] isEqual:identifier];}];
+    NSMutableArray *entries=[[self schedules]mutableCopy];NSIndexSet *indexes=[entries indexesOfObjectsPassingTest:^BOOL(NSDictionary *e,__unused NSUInteger i,__unused BOOL *stop){return [e[@"id"] isEqual:identifier];}];
     [entries removeObjectsAtIndexes:indexes];[[NSUserDefaults standardUserDefaults]setObject:entries forKey:@"AZ.GPS.schedules"];
 }
 - (void)addDailyScheduleAt:(NSInteger)minute weekdays:(NSArray *)days type:(NSString *)type {
@@ -1130,8 +1130,9 @@ static NSString * const kLastLonKey = @"azgps.lastLongitude";
     if(UIApplication.sharedApplication.applicationState!=UIApplicationStateActive)return;
     NSDate *now=NSDate.date;NSDateComponents *parts=[NSCalendar.currentCalendar components:NSCalendarUnitYear|NSCalendarUnitMonth|NSCalendarUnitDay|NSCalendarUnitWeekday|NSCalendarUnitHour|NSCalendarUnitMinute fromDate:now];
     for(NSDictionary *entry in [self schedules]){
-        if([entry[@"minute"]integerValue]!=parts.hour*60+parts.minute || ![entry[@"days"]containsObject:@(parts.weekday)])continue;
-        NSString *key=[@"AZ.GPS.fired."stringByAppendingString:entry[@"id"]];
+        unsigned mask=0;for(NSNumber *day in entry[@"days"]){NSInteger n=day.integerValue;if(n>=1&&n<=7)mask|=1u<<(n-1);}
+        if(!azgps::scheduleDue((int)[entry[@"minute"]integerValue],(int)(parts.hour*60+parts.minute),(int)parts.weekday,mask,false))continue;
+        NSString *key=[@"AZ.GPS.fired." stringByAppendingString:entry[@"id"]];
         NSString *date=[NSString stringWithFormat:@"%ld-%ld-%ld",(long)parts.year,(long)parts.month,(long)parts.day];
         if([[NSUserDefaults.standardUserDefaults stringForKey:key]isEqual:date])continue;
         [NSUserDefaults.standardUserDefaults setObject:date forKey:key];NSDictionary *plan=entry[@"plan"];NSString *type=plan[@"type"];
