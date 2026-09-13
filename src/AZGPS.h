@@ -320,3 +320,6 @@ typedef NS_ENUM(NSInteger, AZMovementEngineState) {
 - (AZError *)startScheduler;
 
 @end
+@class CLLocation;
+/// Fresh real device location, independent of the simulation state. Main-thread completion.
+void AZRequestRealLocation(void (^completion)(CLLocation *location, NSError *error));

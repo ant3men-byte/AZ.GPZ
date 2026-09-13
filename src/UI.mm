@@ -671,83 +671,21 @@
 }
 
 - (void)goMyLocation {
-
-    AZAuditLogFeature(
-        @"goMyLocation",
-        @"REQUESTED",
-        @"Reading current location with runtime fallback"
-    );
-
-    CLLocation *loc = _mapView.userLocation.location;
-    NSString *source = @"MKMapView.userLocation";
-
-    // MKMapView may temporarily return nil while its provider is starting.
-    // Preserve the working behavior by falling back to AZGPS's active
-    // runtime coordinate when one is available.
-    if (!loc) {
-
-        AZRuntimeState *state =
-            [AZRuntimeState sharedState];
-
-        BOOL validRuntimeCoordinate =
-            state.locationEnabled &&
-            state.currentLatitude >= -90.0 &&
-            state.currentLatitude <= 90.0 &&
-            state.currentLongitude >= -180.0 &&
-            state.currentLongitude <= 180.0 &&
-            !(state.currentLatitude == 0.0 &&
-              state.currentLongitude == 0.0);
-
-        if (validRuntimeCoordinate) {
-
-            loc =
-                [[CLLocation alloc]
-                    initWithLatitude:state.currentLatitude
-                    longitude:state.currentLongitude];
-
-            source = @"AZGPSRuntime";
-
-            AZAuditLogFeature(
-                @"goMyLocation",
-                @"FALLBACK",
-                @"MKMapView location unavailable; using active AZGPS runtime coordinate"
-            );
+    AZAuditLogFeature(@"goMyLocation",@"REQUESTED",@"Requesting fresh real device location");
+    __weak AZUIController *weakSelf=self;
+    AZRequestRealLocation(^(CLLocation *location,NSError *error) {
+        AZUIController *selfRef=weakSelf;
+        if (!selfRef) return;
+        if (!location) {
+            AZAuditLogFeature(@"goMyLocation",@"ERROR",error.localizedDescription);
+            [selfRef alert:error.localizedDescription ?: @"تعذر الحصول على الموقع الحقيقي."];
+            return;
         }
-    }
-
-    if (!loc) {
-
-        AZAuditLogFeature(
-            @"goMyLocation",
-            @"NO_LOCATION",
-            @"MKMapView location is nil and no valid active runtime coordinate exists"
-        );
-
-        [self alert:
-            @"\u0627\u0644\u0645\u0648\u0642\u0639 \u0627\u0644\u062d\u0627\u0644\u064a \u063a\u064a\u0631 \u0645\u062a\u0627\u062d."];
-
-        return;
-    }
-
-    AZAuditLogLocation(
-        [NSString stringWithFormat:@"goMyLocation.%@", source],
-        loc
-    );
-
-    [self selectCoordinate:
-        loc.coordinate
-        animated:YES];
-
-    [self auditStateForFeature:
-        @"goMyLocation"
-        status:@"SUCCESS"
-        details:[NSString stringWithFormat:
-            @"source=%@ | selectedLat=%.8f | selectedLon=%.8f",
-            source,
-            loc.coordinate.latitude,
-            loc.coordinate.longitude]];
+        AZAuditLogLocation(@"goMyLocation.real",location);
+        [selfRef selectCoordinate:location.coordinate animated:YES];
+        [selfRef centerSelected];
+    });
 }
-
 
 #pragma mark - Search
 
@@ -862,33 +800,12 @@
 
 
 - (void)restoreLocation {
-
-    AZAuditLogFeature(
-        @"restoreLocation",
-        @"REQUESTED",
-        @"Restore button pressed"
-    );
-
-    AZError *e =
-        [[AZAppManager sharedManager]
-            restoreDefaultLocation];
-
-    _locationSwitch.on = NO;
-
-    [self auditErrorResult:
-        e
-        feature:@"restoreLocation"
-        details:@"source=Restore button"];
-
+    AZError *result=[[AZAppManager sharedManager] restoreDefaultLocation];
     [self refreshStatus];
-
-    [self alert:
-        [e isSuccess]
-            ? @"\u062a\u0645\u062a \u0627\u0644\u0627\u0633\u062a\u0639\u0627\u062f\u0629 \u2705"
-            : (e.humanReadableMessage
-                ?: @"\u062a\u0639\u0630\u0631\u062a \u0627\u0644\u0627\u0633\u062a\u0639\u0627\u062f\u0629.")];
+    if (![result isSuccess]) { [self alert:result.humanReadableMessage]; return; }
+    // Simulation is disabled before requesting the device position.
+    [self goMyLocation];
 }
-
 
 - (void)saveCurrent {
 

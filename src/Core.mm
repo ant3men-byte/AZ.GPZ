@@ -47,6 +47,74 @@ static CLLocation *AZGPS_buildFakeLocation(AZRuntimeState *state) {
         timestamp:[NSDate date]];
 }
 
+
+#pragma mark - Real device location
+@interface AZRealLocationReader : NSObject <CLLocationManagerDelegate>
+@property(nonatomic, strong) CLLocationManager *manager;
+@property(nonatomic, strong) NSMutableArray *callbacks;
+@property(nonatomic) BOOL running;
+@property(nonatomic) NSUInteger generation;
+@end
+@implementation AZRealLocationReader
++ (instancetype)sharedReader {
+    static AZRealLocationReader *reader; static dispatch_once_t once;
+    dispatch_once(&once, ^{ reader=[self new]; reader.callbacks=[NSMutableArray new]; });
+    return reader;
+}
+- (NSError *)error:(NSString *)message {
+    return [NSError errorWithDomain:@"AZ.GPS.RealLocation" code:1 userInfo:@{NSLocalizedDescriptionKey:message}];
+}
+- (void)finish:(CLLocation *)location error:(NSError *)error {
+    self.running=NO;
+    if (self.manager && orig_stopUpdatingLocation) orig_stopUpdatingLocation(self.manager,@selector(stopUpdatingLocation));
+    NSArray *callbacks=[self.callbacks copy]; [self.callbacks removeAllObjects];
+    for (void (^callback)(CLLocation *,NSError *) in callbacks) callback(location,error);
+}
+- (void)request:(void (^)(CLLocation *,NSError *))completion {
+    [self.callbacks addObject:[completion copy]];
+    if (self.running) return;
+    self.running=YES; NSUInteger generation=++self.generation;
+    if (!self.manager) {
+        self.manager=[CLLocationManager new];
+        self.manager.desiredAccuracy=kCLLocationAccuracyBest;
+        // Call captured system implementations directly: never register this
+        // private reader in the simulation broadcaster or delegate proxy.
+        orig_setDelegate(self.manager,@selector(setDelegate:),self);
+    }
+    CLAuthorizationStatus status=[CLLocationManager authorizationStatus];
+    if (status==kCLAuthorizationStatusDenied || status==kCLAuthorizationStatusRestricted) {
+        [self finish:nil error:[self error:@"اسمح للتطبيق بالوصول إلى الموقع من إعدادات iOS."]]; return;
+    }
+    if (status==kCLAuthorizationStatusNotDetermined) {
+        NSDictionary *info=NSBundle.mainBundle.infoDictionary;
+        if (![info[@"NSLocationWhenInUseUsageDescription"] length]) {
+            [self finish:nil error:[self error:@"التطبيق يحتاج NSLocationWhenInUseUsageDescription لطلب إذن الموقع."]]; return;
+        }
+        [self.manager requestWhenInUseAuthorization];
+    }
+    orig_startUpdatingLocation(self.manager,@selector(startUpdatingLocation));
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,20*NSEC_PER_SEC),dispatch_get_main_queue(),^{
+        if (self.running && self.generation==generation)
+            [self finish:nil error:[self error:@"لم يصل موقع حقيقي حديث. تحقق من إذن الموقع وخدمات الموقع ثم حاول مجددًا."]];
+    });
+}
+- (void)locationManager:(CLLocationManager *)manager didUpdateLocations:(NSArray<CLLocation *> *)locations {
+    if (!self.running) return;
+    CLLocation *location=locations.lastObject;
+    if (!location || location.horizontalAccuracy<0 || !CLLocationCoordinate2DIsValid(location.coordinate) ||
+        fabs([location.timestamp timeIntervalSinceNow])>15) return;
+    [self finish:location error:nil];
+}
+- (void)locationManager:(CLLocationManager *)manager didFailWithError:(NSError *)error {
+    if (!self.running || ([error.domain isEqualToString:kCLErrorDomain] && error.code==kCLErrorLocationUnknown)) return;
+    [self finish:nil error:error];
+}
+@end
+void AZRequestRealLocation(void (^completion)(CLLocation *,NSError *)) {
+    if (!completion) return;
+    dispatch_async(dispatch_get_main_queue(),^{ [[AZRealLocationReader sharedReader] request:completion]; });
+}
+
 #pragma mark - Delegate Proxy
 
 @interface AZGPSDelegateProxy : NSObject <CLLocationManagerDelegate>
