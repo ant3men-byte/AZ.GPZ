@@ -6,7 +6,7 @@ FLAGS := -isysroot $(SDK) -arch arm64 -miphoneos-version-min=12.0 -fobjc-arc -st
 all: build/AZ.GPS.dylib
 build/AZ.GPS.dylib: $(SOURCES) $(wildcard src/*.h)
 	mkdir -p build
-	$(CXX) $(FLAGS) -dynamiclib $(SOURCES) -framework Foundation -framework UIKit -framework CoreLocation -framework MapKit -Wl,-install_name,@rpath/AZ.GPS.dylib -o $@
+	$(CXX) $(FLAGS) -dynamiclib $(SOURCES) -framework Foundation -framework UIKit -framework CoreLocation -framework MapKit -framework CoreGraphics -framework QuartzCore -Wl,-install_name,@rpath/AZ.GPS.dylib -o $@
 	codesign --force --sign - $@
 test:
 	mkdir -p build

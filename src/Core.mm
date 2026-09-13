@@ -258,7 +258,7 @@ static void AZGPSStartBroadcasts(void) {
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         static NSTimer *timer;
-        timer=[NSTimer timerWithTimeInterval:1.0 repeats:YES block:^(NSTimer *t) {
+        timer=[NSTimer timerWithTimeInterval:1.0 repeats:YES block:^(__unused NSTimer *t) {
             for (CLLocationManager *manager in AZGPSManagers().allObjects) AZGPSDeliver(manager);
         }];
         [[NSRunLoop mainRunLoop] addTimer:timer forMode:NSRunLoopCommonModes];
