@@ -1271,6 +1271,7 @@ static NSString *const AZAppearancePrefsKey=@"AZ.GPS.ui.appearance";
         }
         NSArray *sorted=[buttons sortedArrayUsingComparator:^NSComparisonResult(UIView *a,UIView *b){return [self baseFrame:a].origin.x<[self baseFrame:b].origin.x?NSOrderedAscending:NSOrderedDescending;}];
         CGFloat left=sorted.count?[self baseFrame:sorted.firstObject].origin.x:0;
+        if(row.count!=buttons.count)left=MIN(left,16.0);
         CGFloat x=left,y=row.count==buttons.count?start:nonButtonEnd+8,lineHeight=0;
         CGFloat width=CGRectGetWidth(container.bounds);
         for(UIButton *button in sorted){
