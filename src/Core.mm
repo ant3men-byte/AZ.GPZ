@@ -2,6 +2,7 @@
 #import "Portable.h"
 #import "UI.h"
 #import "Audit.h"
+#import "Identity.h"
 
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
@@ -990,6 +991,7 @@ static NSString * const kLastLonKey = @"azgps.lastLongitude";
 + (instancetype)sharedManager { static AZAppManager *instance; static dispatch_once_t once; dispatch_once(&once, ^{ instance=[self new]; }); return instance; }
 - (void)initialize {
     AZGPSInstallRuntimeHooks();
+    AZInstallIdentityHook();
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(background:) name:UIApplicationDidEnterBackgroundNotification object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(foreground:) name:UIApplicationDidBecomeActiveNotification object:nil];
     [self startScheduler];
@@ -1142,7 +1144,15 @@ static NSString * const kLastLonKey = @"azgps.lastLongitude";
     }
 }
 - (AZError *)setActiveWiFiProfileWithID:(NSString *)p {return [self unavailable];}
-- (AZError *)setActiveDeviceProfileWithID:(NSString *)p {return [self unavailable];}
+- (AZError *)setActiveDeviceProfileWithID:(NSString *)p {
+    if(!p.length)AZRestoreIdentity();
+    else if(!AZSetIdentity(p))return [self invalid];
+    [[AZRuntimeState sharedState]performUpdate:^(id<AZRuntimeStateMutable> state){
+        state.activeDeviceProfileID=AZIdentityEnabled()?AZSavedIdentity():@"";
+        state.lastAction=AZIdentityEnabled()?@"Device identity enabled":@"Device identity restored";
+    }];
+    return [AZError success];
+}
 @end
 __attribute__((constructor)) static void AZGPSEntry(void) {
     @autoreleasepool { dispatch_async(dispatch_get_main_queue(), ^{

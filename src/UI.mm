@@ -1,6 +1,7 @@
 #import "AZGPS.h"
 #import "UI.h"
 #import "Audit.h"
+#import "Identity.h"
 
 #import <UIKit/UIKit.h>
 #import <MapKit/MapKit.h>
@@ -451,7 +452,7 @@
                           frame:CGRectMake(160+i*dW,13,dW-4,38)
                            tint:deviceColors[i]];
         [b addTarget:self action:@selector(deviceAction:) forControlEvents:UIControlEventTouchUpInside];
-        b.tag=i; b.enabled=NO; b.alpha=0.4;
+        b.tag=i;
         [device addSubview:b];
     }
 
@@ -1047,51 +1048,42 @@
 
 
 - (void)deviceAction:(UIButton *)sender {
-
-    NSString *actionName = @"unknown";
-
-    switch (sender.tag) {
-        case 0: actionName = @"copy"; break;
-        case 1: actionName = @"fill"; break;
-        case 2: actionName = @"identity"; break;
-        case 3: actionName = @"restore"; break;
-        default: break;
+    AZAppManager *manager=AZAppManager.sharedManager;
+    if(sender.tag==0){
+        NSString *value=AZCurrentIdentity();
+        if(!value.length){[self alert:@"معرف التطبيق غير متاح حاليًا من iOS."];return;}
+        UIPasteboard.generalPasteboard.string=value;
+        [self alert:[NSString stringWithFormat:@"تم نسخ المعرف الذي يراه التطبيق الآن:\n%@",value]];
+    }else if(sender.tag==1){
+        UIAlertController *alert=[UIAlertController alertControllerWithTitle:@"تعبئة معرف الجهاز" message:@"أدخل UUID لتفعيل استبدال identifierForVendor داخل التطبيق. يبقى محفوظًا بعد إعادة تشغيل التطبيق." preferredStyle:UIAlertControllerStyleAlert];
+        [alert addTextFieldWithConfigurationHandler:^(UITextField *field){
+            field.placeholder=@"XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX";
+            field.text=AZSavedIdentity().length?AZSavedIdentity():AZCurrentIdentity();
+            field.autocorrectionType=UITextAutocorrectionTypeNo;field.autocapitalizationType=UITextAutocapitalizationTypeAllCharacters;
+        }];
+        [alert addAction:[UIAlertAction actionWithTitle:@"حفظ وتفعيل" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action){
+            
+            // Empty input is invalid here; restoration has its own button.
+            if(![alert.textFields.firstObject.text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet].length){
+                [self alert:@"أدخل UUID صالحًا."];return;
+            }
+            AZError *result=[manager setActiveDeviceProfileWithID:alert.textFields.firstObject.text];
+            if(!result.isSuccess){[self alert:@"UUID غير صالح. مثال: 550E8400-E29B-41D4-A716-446655440000"];return;}
+            [self alert:[NSString stringWithFormat:@"المعرف المفعّل:\n%@",AZCurrentIdentity()]];
+        }]];
+        [alert addAction:[UIAlertAction actionWithTitle:@"إلغاء" style:UIAlertActionStyleCancel handler:nil]];
+        [[self presenter]presentViewController:alert animated:YES completion:nil];
+    }else if(sender.tag==2){
+        NSString *value=NSUUID.UUID.UUIDString;
+        AZError *result=[manager setActiveDeviceProfileWithID:value];
+        if(!result.isSuccess){[self alert:result.humanReadableMessage];return;}
+        [self alert:[NSString stringWithFormat:@"تم توليد وحفظ وتفعيل هوية جديدة:\n%@",AZCurrentIdentity()]];
+    }else if(sender.tag==3){
+        [manager setActiveDeviceProfileWithID:@""];
+        NSString *value=AZCurrentIdentity();
+        [self alert:value.length?[NSString stringWithFormat:@"تمت استعادة المعرف الأصلي:\n%@",value]:@"تم تعطيل الاستبدال. المعرف الأصلي غير متاح حاليًا من iOS."];
     }
-
-    AZAuditLogFeature(
-        @"deviceAction",
-        @"REQUESTED",
-        [NSString stringWithFormat:
-            @"action=%@ | tag=%ld",
-            actionName,
-            (long)sender.tag]
-    );
-
-    if (sender.tag == 3) {
-
-        AZError *e =
-            [[AZAppManager sharedManager]
-                setActiveDeviceProfileWithID:@""];
-
-        [self auditErrorResult:
-            e
-            feature:@"restoreDeviceProfile"
-            details:@"profileID=<empty>"];
-    }
-    else {
-
-        [self auditStateForFeature:
-            @"deviceAction"
-            status:@"UI_ONLY"
-            details:[NSString stringWithFormat:
-                @"action=%@ is not connected to data layer",
-                actionName]];
-    }
-
-    [self alert:
-        @"Device Profile UI \u062c\u0627\u0647\u0632\u0629 \u0644\u0644\u062a\u0648\u0635\u064a\u0644 \u0628\u0627\u0644\u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0644\u0641\u0639\u0644\u064a\u0629."];
 }
-
 
 - (void)stopAll {
 

@@ -1,6 +1,6 @@
 SDK := $(shell xcrun --sdk iphoneos --show-sdk-path)
 CXX := $(shell xcrun --sdk iphoneos -f clang++)
-SOURCES := src/Core.mm src/UI.mm src/Audit.mm src/Portable.cpp
+SOURCES := src/Core.mm src/UI.mm src/Audit.mm src/Portable.cpp src/Identity.mm
 FLAGS := -isysroot $(SDK) -arch arm64 -miphoneos-version-min=12.0 -fobjc-arc -std=c++17 -O2 -Wall -Wextra
 .PHONY: all test
 all: build/AZ.GPS.dylib
