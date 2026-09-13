@@ -858,25 +858,33 @@
 
 
 - (void)showSaved {
-
-    NSArray *items =
-        [[AZLocationService sharedService]
-            favorites];
-
-    AZAuditLogFeature(
-        @"showSaved",
-        @"SUCCESS",
-        [NSString stringWithFormat:
-            @"favoritesCount=%lu",
-            (unsigned long)items.count]
-    );
-
-    [self alert:
-        [NSString stringWithFormat:
-            @"\u0639\u062f\u062f \u0627\u0644\u0645\u0648\u0627\u0642\u0639 \u0627\u0644\u0645\u062d\u0641\u0648\u0638\u0629: %lu",
-            (unsigned long)items.count]];
+    NSArray<AZLocationModel *> *items=[[AZLocationService sharedService] favorites];
+    if (!items.count) { [self alert:@"لا توجد مواقع محفوظة. حدد موقعًا واضغط حفظ أولًا."]; return; }
+    UIAlertController *list=[UIAlertController alertControllerWithTitle:@"المواقع المحفوظة"
+        message:@"اختر موقعًا للانتقال إليه وتفعيله"
+        preferredStyle:UIAlertControllerStyleActionSheet];
+    __weak AZUIController *weakSelf=self;
+    for (AZLocationModel *item in items) {
+        NSString *title=[NSString stringWithFormat:@"%@ — %.6f, %.6f",item.name,item.latitude,item.longitude];
+        [list addAction:[UIAlertAction actionWithTitle:title style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+            AZUIController *selfRef=weakSelf;
+            if (!selfRef) return;
+            AZError *result=[[AZAppManager sharedManager] activateStaticLocationWithLatitude:item.latitude longitude:item.longitude];
+            [selfRef auditErrorResult:result feature:@"activateSavedLocation" details:item.locationID];
+            if (![result isSuccess]) { [selfRef alert:result.humanReadableMessage]; return; }
+            [selfRef selectCoordinate:CLLocationCoordinate2DMake(item.latitude,item.longitude) animated:YES];
+            [selfRef centerSelected];
+            [selfRef refreshStatus];
+        }]];
+    }
+    [list addAction:[UIAlertAction actionWithTitle:@"إلغاء" style:UIAlertActionStyleCancel handler:nil]];
+    UIViewController *presenter=_overlayWindow.rootViewController;
+    while (presenter.presentedViewController) presenter=presenter.presentedViewController;
+    // Action sheets need an anchor on iPad.
+    list.popoverPresentationController.sourceView=_panel ?: presenter.view;
+    list.popoverPresentationController.sourceRect=CGRectMake(14,124,80,48);
+    [presenter presentViewController:list animated:YES completion:nil];
 }
-
 
 - (void)routeTapped {
 
